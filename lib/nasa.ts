@@ -1,6 +1,7 @@
 import { APOD } from '@/types/nasa'
 import { cache } from 'react'
 import { repairAPOD } from '@/lib/apod-fallback'
+import { easternDate } from '@/lib/dates'
 const BASE_URL = 'https://api.nasa.gov/planetary/apod'
 const API_KEY = process.env.NASA_API_KEY
 
@@ -47,14 +48,6 @@ async function fetchNASA<T>(url: string, init?: RequestInit): Promise<T> {
   throw lastError
 }
 
-// "Today" for APOD means today in US Eastern time — NASA publishes at
-// midnight ET. Returns YYYY-MM-DD, `daysBack` days before today (ET).
-function easternDate(daysBack = 0): string {
-  const d = new Date(Date.now() - daysBack * 86400000)
-  // en-CA formats as YYYY-MM-DD
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-}
-
 // Fetch today's APOD — called from the home page Server Component
 // Notice: no 'use client' — this runs on the server only
 export async function getTodayAPOD(): Promise<APOD> {
@@ -63,8 +56,9 @@ export async function getTodayAPOD(): Promise<APOD> {
   const init = { next: { revalidate: 86400, tags: ['apod-today'] } }
 
   try {
+    const apod = await fetchNASA<APOD>(buildUrl({ thumbs: 'true' }), init)
     // repairAPOD: temporary workaround for NASA's placeholder responses
-    return repairAPOD(await fetchNASA<APOD>(buildUrl({}), init))
+    return repairAPOD(apod)
   } catch (err) {
     // The "no date" request is the flakiest one. Ask for today's date
     // explicitly, then yesterday's (today's may not be published yet).
@@ -81,19 +75,26 @@ export async function getTodayAPOD(): Promise<APOD> {
 
 // Fetch a specific date — called from /apod/[date] page
 export const getAPODByDate = cache(async (date: string): Promise<APOD> => {
-  const apod = await fetchNASA<APOD>(buildUrl({ date }), {
+  const apod = await fetchNASA<APOD>(buildUrl({ date, thumbs: 'true' }), {
     next: { revalidate: 86400 * 30, tags: [`apod-${date}`] }
   })
   return repairAPOD(apod)
 })
 
-// Fetch random images for the explore grid — used by /api/apod,
-// which the client calls via SWR
-export async function getRandomAPODs(count: number = 20): Promise<APOD[]> {
-  const apods = await fetchNASA<APOD[]>(buildUrl({ count: count.toString() }), {
-    // Cache random batches for 1 hour
-    next: { revalidate: 3600 }
-  })
+// Fetch a random batch — used by the /explore page, its "Shuffle the sky"
+// server action, and /api/apod.
+// By default the batch is cached for 1 hour (same URL → same batch).
+// Pass { fresh: true } to skip the cache and get a genuinely new batch.
+export async function getRandomAPODs(
+  count: number = 20,
+  { fresh = false }: { fresh?: boolean } = {}
+): Promise<APOD[]> {
+  const url = buildUrl({ count: count.toString(), thumbs: 'true' })
+  const apods = await fetchNASA<APOD[]>(
+    url,
+    fresh ? { cache: 'no-store' } : { next: { revalidate: 3600 } }
+  )
+  // Per-entry repair lookups are still cached per date (lib/apod-fallback.ts)
   return Promise.all(apods.map(repairAPOD))
 }
 

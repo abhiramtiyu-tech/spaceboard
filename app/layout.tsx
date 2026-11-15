@@ -6,6 +6,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import Navbar from '@/components/ui/Navbar'
+import HideOnPaths from '@/components/ui/HideOnPaths'
 
 // next/font automatically optimises fonts — downloads at build time,
 // no layout shift, no extra network request from the browser
@@ -53,7 +54,10 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {/* Navbar is a Server Component — no useState, no useEffect */}
         {/* It renders on server and ships as plain HTML */}
-        <Navbar />
+        {/* Hidden on the "living sky" pages — they draw SiteHeader over the sky */}
+        <HideOnPaths paths={['/', '/explore']}>
+          <Navbar />
+        </HideOnPaths>
 
         {/* children is whatever page.tsx or layout.tsx is active */}
         {/* Next.js injects it here automatically */}

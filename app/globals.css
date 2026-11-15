@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* "Living sky" design tokens (Today and Explore pages).
+   Font variables come from lib/fonts.ts (next/font); --sky-h is set by
+   components/sky/SkyProvider.tsx from the time-of-day palette.
+   Utilities: font-display, font-ui, font-label, text-sky-accent, bg-sky-accent */
+@theme inline {
+  --font-display: var(--font-instrument-serif), serif;
+  --font-ui: var(--font-manrope), system-ui, sans-serif;
+  --font-label: var(--font-plex-mono), monospace;
+  --color-sky-accent: oklch(0.86 0.11 var(--sky-h, 265));
+}
+
 :root {
   --space-dark: #04080f;
   --space-mid: #0a1628;
@@ -14,6 +25,11 @@
 body {
   background-color: #ffffff;
   color: #111111;
+}
+
+/* Dark page behind the sky pages, so overscroll doesn't flash white */
+body:has([data-sky-page]) {
+  background-color: #03040a;
 }
 
 /* Smooth scrolling everywhere */
