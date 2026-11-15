@@ -15,7 +15,19 @@ export default async function RecentList() {
   const endDate = daysAgo(1)   // yesterday
   const startDate = daysAgo(7) // 7 days ago
 
-  const apods = await getAPODRange(startDate, endDate)
+  // Don't let a NASA outage crash the home page (or a build) — show a notice
+  const apods = await getAPODRange(startDate, endDate).catch((err) => {
+    console.error('Could not load recent APODs:', err)
+    return null
+  })
+
+  if (!apods) {
+    return (
+      <p className="text-sm text-gray-400 text-center py-6">
+        Recent images are temporarily unavailable.
+      </p>
+    )
+  }
 
   // Reverse so newest is first
   const sorted = [...apods].reverse()

@@ -1,6 +1,7 @@
 import { APOD } from '@/types/nasa'
 import { cache } from 'react'
 import { repairAPOD } from '@/lib/apod-fallback'
+import { easternDate } from '@/lib/dates'
 const BASE_URL = 'https://api.nasa.gov/planetary/apod'
 const API_KEY = process.env.NASA_API_KEY
 
@@ -9,90 +10,102 @@ const API_KEY = process.env.NASA_API_KEY
 function buildUrl(params: Record<string, string>): string {
   const url = new URL(BASE_URL)
   url.searchParams.set('api_key', API_KEY!)
-  
+
   // Spread any extra params — date, count, start_date etc.
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value)
   })
-  
+
   return url.toString()
+}
+
+// NASA's API intermittently returns 500/503 (or drops the connection).
+// Retry those a few times with a short backoff before giving up.
+// 4xx errors (bad key, bad date) are not retried — they won't fix themselves.
+const MAX_ATTEMPTS = 3
+
+async function fetchNASA<T>(url: string, init?: RequestInit): Promise<T> {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      // Always check res.ok — throwing triggers the nearest error.tsx boundary
+      if (res.ok) return res.json()
+
+      lastError = new Error(`NASA API error: ${res.status}`)
+      if (res.status < 500) break
+    } catch (err) {
+      // Network failure / connection reset
+      lastError = err
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, 500 * attempt))
+    }
+  }
+
+  throw lastError
 }
 
 // Fetch today's APOD — called from the home page Server Component
 // Notice: no 'use client' — this runs on the server only
 export async function getTodayAPOD(): Promise<APOD> {
-    
-  const url = buildUrl({})
-  
-  const res = await fetch(url, {
-    // next.revalidate tells Next.js how long to cache this response
-    // 86400 seconds = 24 hours — APOD only updates once per day
-    // This is Next.js's extended fetch API — not standard browser fetch
-    next: { revalidate: 86400, tags: ['apod-today'] }
-  })
+  // next.revalidate tells Next.js how long to cache this response.
+  // This is Next.js's extended fetch API — not standard browser fetch
+  const init = { next: { revalidate: 86400, tags: ['apod-today'] } }
 
-  // Always check res.ok — NASA returns 200 even for some errors
-  if (!res.ok) {
-    // Throwing here triggers the nearest error.tsx boundary
-    throw new Error(`NASA API error: ${res.status}`)
+  try {
+    const apod = await fetchNASA<APOD>(buildUrl({ thumbs: 'true' }), init)
+    // repairAPOD: temporary workaround for NASA's placeholder responses
+    return repairAPOD(apod)
+  } catch (err) {
+    // The "no date" request is the flakiest one. Ask for today's date
+    // explicitly, then yesterday's (today's may not be published yet).
+    for (const date of [easternDate(0), easternDate(1)]) {
+      try {
+        return await getAPODByDate(date)
+      } catch {
+        // try the next one
+      }
+    }
+    throw err
   }
-
-  // repairAPOD: temporary workaround for NASA's placeholder responses
-  return repairAPOD(await res.json())
 }
 
 // Fetch a specific date — called from /apod/[date] page
 export const getAPODByDate = cache(async (date: string): Promise<APOD> => {
-  const url = buildUrl({ date })
-
-  const res = await fetch(url, {
+  const apod = await fetchNASA<APOD>(buildUrl({ date, thumbs: 'true' }), {
     next: { revalidate: 86400 * 30, tags: [`apod-${date}`] }
   })
-
-  if (!res.ok) {
-    throw new Error(`NASA API error: ${res.status}`)
-  }
-
-  return repairAPOD(await res.json())
+  return repairAPOD(apod)
 })
 
-// Fetch random images for the explore grid — used by /api/apod,
-// which the client calls via SWR
-export async function getRandomAPODs(count: number = 20): Promise<APOD[]> {
-  const url = buildUrl({ count: count.toString() })
-
-  const res = await fetch(url, {
-    // Cache random batches for 1 hour
-    next: { revalidate: 3600 }
-  })
-
-  if (!res.ok) {
-    throw new Error(`NASA API error: ${res.status}`)
-  }
-
-  const apods: APOD[] = await res.json()
+// Fetch a random batch — used by the /explore page, its "Shuffle the sky"
+// server action, and /api/apod.
+// By default the batch is cached for 1 hour (same URL → same batch).
+// Pass { fresh: true } to skip the cache and get a genuinely new batch.
+export async function getRandomAPODs(
+  count: number = 20,
+  { fresh = false }: { fresh?: boolean } = {}
+): Promise<APOD[]> {
+  const url = buildUrl({ count: count.toString(), thumbs: 'true' })
+  const apods = await fetchNASA<APOD[]>(
+    url,
+    fresh ? { cache: 'no-store' } : { next: { revalidate: 3600 } }
+  )
+  // Per-entry repair lookups are still cached per date (lib/apod-fallback.ts)
   return Promise.all(apods.map(repairAPOD))
 }
-
 
 // Fetch a date range for the D3 chart
 export async function getAPODRange(
   startDate: string,
   endDate: string
 ): Promise<APOD[]> {
-  const url = buildUrl({
-    start_date: startDate,
-    end_date: endDate
-  })
-
-  const res = await fetch(url, {
-    next: { revalidate: 86400 }
-  })
-
-  if (!res.ok) {
-    throw new Error(`NASA API error: ${res.status}`)
-  }
-
-  const apods: APOD[] = await res.json()
+  const apods = await fetchNASA<APOD[]>(
+    buildUrl({ start_date: startDate, end_date: endDate }),
+    { next: { revalidate: 86400 } }
+  )
   return Promise.all(apods.map(repairAPOD))
 }
