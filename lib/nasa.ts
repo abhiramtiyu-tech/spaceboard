@@ -1,5 +1,6 @@
-import { APOD, APODRange } from '@/types/nasa'
+import { APOD } from '@/types/nasa'
 import { cache } from 'react'
+import { repairAPOD } from '@/lib/apod-fallback'
 const BASE_URL = 'https://api.nasa.gov/planetary/apod'
 const API_KEY = process.env.NASA_API_KEY
 
@@ -36,8 +37,8 @@ export async function getTodayAPOD(): Promise<APOD> {
     throw new Error(`NASA API error: ${res.status}`)
   }
 
-  return res.json()
-  
+  // repairAPOD: temporary workaround for NASA's placeholder responses
+  return repairAPOD(await res.json())
 }
 
 // Fetch a specific date — called from /apod/[date] page
@@ -52,21 +53,25 @@ export const getAPODByDate = cache(async (date: string): Promise<APOD> => {
     throw new Error(`NASA API error: ${res.status}`)
   }
 
-  return res.json()
+  return repairAPOD(await res.json())
 })
 
-// Fetch random images for the explore grid — client side via SWR
-// No cache config here — SWR handles caching on the client
+// Fetch random images for the explore grid — used by /api/apod,
+// which the client calls via SWR
 export async function getRandomAPODs(count: number = 20): Promise<APOD[]> {
   const url = buildUrl({ count: count.toString() })
 
-  const res = await fetch(url)
+  const res = await fetch(url, {
+    // Cache random batches for 1 hour
+    next: { revalidate: 3600 }
+  })
 
   if (!res.ok) {
     throw new Error(`NASA API error: ${res.status}`)
   }
 
-  return res.json()
+  const apods: APOD[] = await res.json()
+  return Promise.all(apods.map(repairAPOD))
 }
 
 
@@ -74,7 +79,7 @@ export async function getRandomAPODs(count: number = 20): Promise<APOD[]> {
 export async function getAPODRange(
   startDate: string,
   endDate: string
-): Promise<APODRange[]> {
+): Promise<APOD[]> {
   const url = buildUrl({
     start_date: startDate,
     end_date: endDate
@@ -88,5 +93,6 @@ export async function getAPODRange(
     throw new Error(`NASA API error: ${res.status}`)
   }
 
-  return res.json()
+  const apods: APOD[] = await res.json()
+  return Promise.all(apods.map(repairAPOD))
 }
