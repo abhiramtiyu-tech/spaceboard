@@ -1,22 +1,20 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-   images: {
+  images: {
     remotePatterns: [
       {
-        // NASA APOD images
+        // Any NASA subdomain — apod.nasa.gov, www.nasa.gov, images.nasa.gov,
+        // science.nasa.gov (APOD images are increasingly hosted here), etc.
+        // `**.` matches subdomains at the beginning of the hostname.
         protocol: 'https',
-        hostname: 'apod.nasa.gov',
+        hostname: '**.nasa.gov',
       },
       {
-        // Some APOD images come from this domain
+        // YouTube thumbnails for video APODs
         protocol: 'https',
-        hostname: 'www.nasa.gov',
-      },
-      {
-        // Occasionally images come from here too
-        protocol: 'https',
-        hostname: 'images.nasa.gov',
+        hostname: 'img.youtube.com',
+        pathname: '/vi/**',
       },
     ],
   },
